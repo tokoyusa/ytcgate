@@ -1,0 +1,1200 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YTC GATE</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- React & ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  
+  <!-- Babel untuk kompilasi JSX di browser -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    body { font-family: 'Inter', sans-serif; scroll-behavior: smooth; }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    
+    .animate-fadeIn { animation: fadeIn 0.5s ease-in-out; }
+    .animate-zoomIn { animation: zoomIn 0.3s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes zoomIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans selection:bg-indigo-100 overflow-x-hidden">
+  
+  <!-- Container utama React -->
+  <div id="root"></div>
+
+  <!-- Source Code Aplikasi React -->
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // --- KOMPONEN ICON HELPER UNTUK HTML ---
+    const Icon = ({ name, size = 24, className = '' }) => {
+      const icon = window.lucide && window.lucide.icons[name];
+      if (!icon) return null;
+      const svgHtml = icon.toSvg({ width: size, height: size, class: className });
+      return <i dangerouslySetInnerHTML={{ __html: svgHtml }} className={`inline-flex items-center justify-center ${className}`} />;
+    };
+
+    // --- KONFIGURASI API (GEMINI) ---
+    // MASUKKAN API KEY GEMINI ANDA DI SINI SEBELUM DI-PUBLISH KE BLOGGER
+    const geminiApiKey = ""; 
+
+    const GeminiAPI = {
+      callWithRetry: async (fn, retries = 5) => {
+        for (let i = 0; i < retries; i++) {
+          try { return await fn(); } catch (err) {
+            if (i === retries - 1) throw err;
+            await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
+          }
+        }
+      },
+      generateText: async (prompt) => {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${geminiApiKey}`;
+        const fetchTask = async () => {
+          const res = await fetch(url, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) 
+          });
+          const data = await res.json();
+          return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        };
+        return await GeminiAPI.callWithRetry(fetchTask);
+      },
+      analyzeImage: async (prompt, base64Image) => {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${geminiApiKey}`;
+        const cleanBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
+        const payload = {
+          contents: [{
+            role: "user",
+            parts: [
+              { text: prompt },
+              { inlineData: { mimeType: "image/png", data: cleanBase64 } }
+            ]
+          }]
+        };
+        const fetchTask = async () => {
+          const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          const data = await res.json();
+          return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        };
+        return await GeminiAPI.callWithRetry(fetchTask);
+      },
+      generateImage: async (promptText) => {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${geminiApiKey}`;
+        const enhancedPrompt = `${promptText}, ultra high definition, 8k, sharp focus, cinematic lighting, masterpiece, hyper-realistic details, no text, no labels, no subtitles`;
+        const payload = { instances: { prompt: enhancedPrompt }, parameters: { sampleCount: 1 } };
+        const fetchTask = async () => {
+          const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          const data = await res.json();
+          const bytes = data.predictions?.[0]?.bytesBase64Encoded || data.predictions?.[0];
+          if (typeof bytes === 'string' && bytes.length > 100) return `data:image/png;base64,${bytes}`;
+          throw new Error("Gagal mengambil data gambar.");
+        };
+        return await GeminiAPI.callWithRetry(fetchTask);
+      },
+      editImage: async (prompt, base64Product, base64ModelRef = null) => {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${geminiApiKey}`;
+        const qualityPrompt = `${prompt}. 
+          LOCKED VISUAL IDENTITY MANDATE: 
+          1. THE PRODUCT IN THE SCENE MUST BE A 100% PIXEL-PERFECT CLONE OF THE PROVIDED PRODUCT IMAGE. 
+          2. DO NOT MODIFY THE LOGO, SHAPE, TEXTURE, OR BRANDING ON THE PRODUCT.
+          3. THE PERSON IN THE SCENE MUST MATCH THE PROVIDED MODEL IMAGE EXACTLY.
+          4. CLEAN IMAGE: NO TEXT, NO SUBTITLES, NO LOGOS, NO CAPTIONS.`;
+        
+        const parts = [{ text: qualityPrompt }];
+        if (base64Product) parts.push({ inlineData: { mimeType: "image/png", data: base64Product.replace(/^data:image\/.*;base64,/, '') } });
+        if (base64ModelRef) parts.push({ inlineData: { mimeType: "image/png", data: base64ModelRef.replace(/^data:image\/.*;base64,/, '') } });
+        const payload = { contents: [{ parts: parts }], generationConfig: { responseModalities: ["IMAGE", "TEXT"], temperature: 0.05 } };
+        const fetchTask = async () => {
+          const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          const data = await res.json();
+          const imgData = data.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
+          return imgData ? `data:image/png;base64,${imgData}` : null;
+        };
+        return await GeminiAPI.callWithRetry(fetchTask);
+      }
+    };
+
+    const Supabase = {
+      fetch: async (config, endpoint, method = 'GET', body = null) => {
+        if (!config.url || !config.key) throw new Error("Konfigurasi Supabase belum diatur.");
+        const headers = { 'apikey': config.key, 'Authorization': `Bearer ${config.key}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
+        const response = await fetch(`${config.url}/rest/v1/${endpoint}`, { method, headers, body: body ? JSON.stringify(body) : null });
+        if (!response.ok) { const err = await response.json(); throw new Error(err.message || "Gagal menghubungi Supabase."); }
+        return await response.json();
+      }
+    };
+
+    const copyToClipboard = (text) => {
+      if (!text) return;
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed"; textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    };
+
+    // Component Preview Modal
+    const ImagePreviewModal = ({ url, onClose }) => {
+      if (!url) return null;
+      return (
+        <div className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
+          <button className="absolute top-6 right-6 text-white hover:text-indigo-400 transition-colors"><Icon name="x" size={32}/></button>
+          <img src={url} className="max-w-full max-h-[90vh] rounded-2xl shadow-2xl animate-zoomIn" onClick={e => e.stopPropagation()} />
+        </div>
+      );
+    };
+
+    const StrategyCard = ({ strategy, index, productImages, mainProductId, modelMode, uploadedModel, generatedModel, productBrand, modelDescription, onUpdateImages, onPreview }) => {
+      const [isGeneratingScene, setIsGeneratingScene] = useState([false, false, false]);
+      const [isGeneratingPrompt, setIsGeneratingPrompt] = useState([false, false, false]);
+      const [isRegeneratingText, setIsRegeneratingText] = useState({ type: null, index: null });
+      
+      const [scripts, setScripts] = useState(() => {
+        const s = strategy?.scripts || [];
+        return [s[0] || "", s[1] || "", s[2] || ""];
+      });
+      const [dialogues, setDialogues] = useState(() => {
+        const d = strategy?.dialogues || [];
+        return [d[0] || "", d[1] || "", d[2] || ""];
+      });
+      
+      const [speakers, setSpeakers] = useState(["Narrator", "Narrator", "Narrator"]);
+      const [videoPrompts, setVideoPrompts] = useState(strategy.videoPrompts || ["", "", ""]);
+
+      const fileToBase64 = (file) => new Promise(r => { const rd = new FileReader(); rd.readAsDataURL(file); rd.onload = () => r(rd.result); });
+
+      const handleRegenerateText = async (type, i) => {
+        setIsRegeneratingText({ type, index: i });
+        if (type === 'script') return;
+        const prompt = `Tulis ulang dialog/narasi persuasif untuk Scene ${i+1} (Speaker: ${speakers[i]}) menjadi SATU kalimat singkat dan natural (maksimal 15 kata). Output hanya teks dialog baru dalam Bahasa Indonesia.`;
+        try {
+          const result = await GeminiAPI.generateText(prompt);
+          const newDialogs = [...dialogues];
+          newDialogs[i] = result.trim();
+          setDialogues(newDialogs);
+        } catch (e) { console.error(e); }
+        setIsRegeneratingText({ type: null, index: null });
+      };
+
+      const handleGeneratePrompt = async (i) => {
+        const newGenStatus = [...isGeneratingPrompt];
+        newGenStatus[i] = true;
+        setIsGeneratingPrompt(newGenStatus);
+        const speakerInstruction = speakers[i] === 'Model' 
+          ? `Mouth movements MUST sync perfectly with the spoken Indonesian words: "${dialogues[i]}". Visual focus on the mouth.`
+          : `Indonesian narrator's voice is clearly heard speaking: "${dialogues[i]}". Subject is silent.`;
+        const promptContext = `
+          Create a high-end commercial text-to-video prompt (MAX 900 chars).
+          VISUAL: ${scripts[i]}
+          AUDIO: ${speakers[i]} speaking Indonesian: "${dialogues[i]}".
+          ${speakerInstruction}
+          CONSISTENCY: Use provided image as starting frame. NO TEXT OVERLAYS.
+        `;
+        try {
+          const result = await GeminiAPI.generateText(promptContext);
+          const newPrompts = [...videoPrompts];
+          newPrompts[i] = result.substring(0, 900);
+          setVideoPrompts(newPrompts);
+        } catch (e) { console.error(e); }
+        const finalGenStatus = [...isGeneratingPrompt];
+        finalGenStatus[i] = false;
+        setIsGeneratingPrompt(finalGenStatus);
+      };
+
+      const handleGenerateSceneImage = async (i) => {
+        const mainProd = productImages.find(p => p.id === mainProductId);
+        if (!mainProd) return;
+        setIsGeneratingScene(prev => { const n = [...prev]; n[i] = true; return n; });
+        const prodB64 = await fileToBase64(mainProd.file);
+        let modelB64 = modelMode === 'upload' && uploadedModel ? await fileToBase64(uploadedModel.file) : generatedModel;
+        try {
+          const visualPromptText = await GeminiAPI.generateText(`
+            Create an English visual prompt for: ${scripts[i]}. 
+            SCENE MANDATE: The scene MUST feature the brand product "${productBrand}" and the person "${modelDescription}". 
+            The product's appearance must be IDENTICAL to the reference image provided.
+            CLEAN IMAGE: ABSOLUTELY NO TEXT. photorealistic quality.`);
+          const fullVisualPrompt = `${visualPromptText}, ultra high definition, 8k, cinematic, 100% locked product identity, NO text, NO labels.`;
+          const imgRes = await GeminiAPI.editImage(fullVisualPrompt, prodB64, modelB64);
+          if (imgRes) {
+            const currentImages = strategy.images ? [...strategy.images] : [null, null, null];
+            currentImages[i] = { url: imgRes, prompt: fullVisualPrompt };
+            onUpdateImages(index, currentImages);
+          }
+        } catch (error) { console.error(error); }
+        setIsGeneratingScene(prev => { const n = [...prev]; n[i] = false; return n; });
+      };
+
+      return (
+        <div className="bg-white rounded-[2rem] md:rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col animate-fadeIn mb-8">
+          <div className="bg-slate-900 p-5 md:p-6 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 md:w-10 md:h-10 bg-indigo-500 rounded-lg md:rounded-xl flex items-center justify-center text-white shadow-lg"><Icon name="film" size={18} /></div>
+              <div>
+                <h3 className="text-white font-bold text-xs md:text-sm uppercase tracking-widest">{strategy?.style || "Ads"} Ads</h3>
+                <p className="text-slate-400 text-[8px] md:text-[10px] font-bold">STORYBOARD STRATEGY #{index + 1}</p>
+              </div>
+            </div>
+          </div>
+          <div className="p-5 md:p-6 space-y-8">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {[0, 1, 2].map(i => (
+                <div key={i} className="flex flex-col gap-4">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[9px] text-slate-400 font-bold uppercase">NASKAH ALUR : SCENE {i+1}</p>
+                    </div>
+                    <textarea value={scripts[i]} onChange={e => { const n = [...scripts]; n[i] = e.target.value; setScripts(n); }} className="w-full text-[11px] p-3 bg-slate-50 border border-slate-200 rounded-xl md:rounded-2xl outline-none min-h-[70px] resize-none focus:bg-white focus:ring-2 focus:ring-indigo-100 transition-all" placeholder="Alur Scene..." />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <p className="text-[9px] text-indigo-400 font-bold uppercase">Dialog/Narasi:</p>
+                        <button onClick={() => handleRegenerateText('dialogue', i)} disabled={isRegeneratingText.type} className="text-indigo-400 hover:text-indigo-600 transition-colors">
+                          <Icon name="refreshCw" size={10} className={isRegeneratingText.type === 'dialogue' && isRegeneratingText.index === i ? 'animate-spin' : ''} />
+                        </button>
+                      </div>
+                      <select className="text-[8px] font-black bg-indigo-50 border border-indigo-100 rounded px-1.5 py-0.5 outline-none text-indigo-600" value={speakers[i]} onChange={e => { const s = [...speakers]; s[i] = e.target.value; setSpeakers(s); }}>
+                        <option value="Narrator">NARRATOR</option>
+                        <option value="Model">MODEL</option>
+                      </select>
+                    </div>
+                    <textarea value={dialogues[i]} onChange={e => { const d = [...dialogues]; d[i] = e.target.value; setDialogues(d); }} className="w-full text-[11px] p-3 bg-indigo-50/30 border border-indigo-100 rounded-xl md:rounded-2xl outline-none min-h-[50px] resize-none text-indigo-900 font-medium focus:bg-white transition-all" placeholder="Teks dialog..." />
+                  </div>
+                  <button onClick={() => handleGenerateSceneImage(i)} disabled={isGeneratingScene[i] || !scripts[i]} className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-[10px] font-black hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-100 disabled:opacity-50">
+                    {isGeneratingScene[i] ? <Icon name="loader2" size={14} className="animate-spin" /> : <Icon name="image" size={14} />} BUAT GAMBAR
+                  </button>
+                  <div className="relative aspect-video bg-slate-50 rounded-2xl md:rounded-3xl border border-slate-100 overflow-hidden group shadow-inner">
+                    {strategy.images && strategy.images[i] ? (
+                      <>
+                        <img src={strategy.images[i].url} className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+                           <button onClick={() => onPreview(strategy.images[i].url)} className="p-2.5 bg-white/20 backdrop-blur-md rounded-full text-white hover:bg-white/40"><Icon name="eye" size={18}/></button>
+                           <a href={strategy.images[i].url} download className="p-2.5 bg-white/20 backdrop-blur-md rounded-full text-white hover:bg-white/40"><Icon name="download" size={18}/></a>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center text-slate-300 gap-2">
+                        {isGeneratingScene[i] ? <Icon name="loader2" className="animate-spin" size={24} /> : <Icon name="image" size={32} className="opacity-20" />}
+                      </div>
+                    )}
+                  </div>
+                  <div className="pt-2 border-t border-slate-100">
+                    <div className="flex items-center justify-between mb-2">
+                       <p className="text-[9px] text-emerald-500 font-bold uppercase tracking-tight">AI Video Prompt:</p>
+                       <div className="flex gap-1">
+                          <button onClick={() => copyToClipboard(videoPrompts[i])} className="text-[8px] font-bold text-slate-500 hover:text-indigo-600 flex items-center gap-1 bg-white border border-slate-200 px-2 py-1 rounded-lg shadow-sm">
+                            <Icon name="copy" size={10} /> SALIN
+                          </button>
+                          <button onClick={() => handleGeneratePrompt(i)} disabled={isGeneratingPrompt[i] || !(strategy.images && strategy.images[i])} className="text-[9px] font-bold text-indigo-600 hover:bg-indigo-50 px-2 py-1 rounded-lg border border-indigo-100 flex items-center gap-1 uppercase">
+                            {isGeneratingPrompt[i] ? <Icon name="loader2" size={10} className="animate-spin" /> : <Icon name="refreshCw" size={10} />} 
+                            {videoPrompts[i] ? 'REGENERATE PROMPT' : 'BUAT PROMPT'}
+                          </button>
+                       </div>
+                    </div>
+                    <textarea value={videoPrompts[i]} readOnly className="w-full text-[9px] p-3 bg-slate-900 text-slate-300 rounded-xl md:rounded-2xl outline-none min-h-[60px] resize-none font-mono leading-relaxed" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const AdminPanel = ({ config, setConfig, onBack }) => {
+      const [emails, setEmails] = useState([]);
+      const [newEmail, setNewEmail] = useState('');
+      const [loading, setLoading] = useState(false);
+      useEffect(() => { loadEmails(); }, [config]);
+      const loadEmails = async () => { if (!config.url || !config.key) return; try { const data = await Supabase.fetch(config, 'whitelist?select=*'); setEmails(data || []); } catch (e) { console.error(e); } };
+      const addEmail = async () => { if (!newEmail) return; setLoading(true); try { await Supabase.fetch(config, 'whitelist', 'POST', { email: newEmail.toLowerCase().trim() }); setNewEmail(''); loadEmails(); } catch (e) { console.error(e); } setLoading(false); };
+      const deleteEmail = async (id) => { try { await Supabase.fetch(config, `whitelist?id=eq.${id}`, 'DELETE'); loadEmails(); } catch (e) { console.error(e); } };
+      return (
+        <div className="min-h-screen bg-slate-50 p-6 flex flex-col items-center">
+          <div className="w-full max-w-4xl space-y-6">
+            <div className="flex items-center justify-between">
+              <h1 className="text-2xl font-bold flex items-center gap-2"><Icon name="settings" className="text-indigo-600" /> Admin Panel</h1>
+              <button onClick={onBack} className="text-sm font-bold text-slate-500 hover:text-indigo-600 flex items-center gap-1"><Icon name="x" size={16} /> Tutup</button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                <h2 className="font-bold text-slate-900 flex items-center gap-2"><Icon name="database" size={18} /> Koneksi Supabase</h2>
+                <input value={config.url} onChange={e => setConfig({...config, url: e.target.value})} placeholder="URL" className="w-full p-2 border border-slate-200 rounded-lg text-sm" />
+                <input value={config.key} onChange={e => setConfig({...config, key: e.target.value})} placeholder="Key" className="w-full p-2 border border-slate-200 rounded-lg text-sm" />
+              </div>
+              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                <h2 className="font-bold text-slate-900 flex items-center gap-2"><Icon name="user" size={18} /> Kelola Whitelist</h2>
+                <div className="flex gap-2">
+                  <input value={newEmail} onChange={e => setNewEmail(e.target.value)} placeholder="Email..." className="flex-grow p-2 border border-slate-200 rounded-lg text-sm" />
+                  <button onClick={addEmail} disabled={loading} className="p-2 bg-indigo-600 text-white rounded-lg"><Icon name="plus" size={20} /></button>
+                </div>
+                <div className="max-h-60 overflow-y-auto space-y-2">
+                  {emails.map(e => (
+                    <div key={e.id} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg border border-slate-100 text-xs">{e.email} <button onClick={() => deleteEmail(e.id)} className="text-red-400"><Icon name="trash2" size={12} /></button></div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const LoginGate = ({ config, onLoginSuccess, onOpenAdmin }) => {
+      const [mode, setMode] = useState('user'); 
+      const [identifier, setIdentifier] = useState(''); 
+      const [password, setPassword] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState('');
+      const handleLogin = async (e) => {
+        e.preventDefault(); setLoading(true); setError('');
+        try {
+          if (mode === 'admin') { if (identifier === 'admin' && password === config.adminPass) onOpenAdmin(); else setError('Gagal.'); }
+          else { const data = await Supabase.fetch(config, `whitelist?email=eq.${identifier.toLowerCase().trim()}&select=*`); if (data?.length > 0) onLoginSuccess(identifier); else setError('Email tidak terdaftar.'); }
+        } catch (err) { setError(err.message); } finally { setLoading(false); }
+      };
+      return (
+        <div className="fixed inset-0 bg-slate-900 flex items-center justify-center p-4 z-50">
+          <div className="bg-white w-full max-w-md rounded-3xl p-8 space-y-6">
+            <div className="text-center"><div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-white mx-auto mb-4"><Icon name="shieldCheck" size={32} /></div><h1 className="text-2xl font-bold">TUTOR YTC</h1></div>
+            <div className="flex bg-slate-100 p-1 rounded-xl">
+              <button onClick={() => setMode('user')} className={`flex-1 py-2 text-[10px] font-bold rounded-lg ${mode === 'user' ? 'bg-white shadow text-indigo-600' : ''}`}>USER EMAIL</button>
+              <button onClick={() => setMode('admin')} className={`flex-1 py-2 text-[10px] font-bold rounded-lg ${mode === 'admin' ? 'bg-white shadow text-indigo-600' : ''}`}>ADMIN</button>
+            </div>
+            <form onSubmit={handleLogin} className="space-y-4">
+              <input type="text" required value={identifier} onChange={e => setIdentifier(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm" placeholder="Masuk dengan email saat Checkout" />
+              {mode === 'admin' && <input type="password" required value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm" placeholder="Password" />}
+              {error && <div className="text-red-500 text-xs text-center font-bold">{error}</div>}
+              <button disabled={loading} className="w-full bg-indigo-600 text-white font-bold py-3.5 rounded-xl">{loading ? '...' : 'Masuk'}</button>
+            </form>
+          </div>
+        </div>
+      );
+    };
+
+    const App = () => {
+      const [view, setView] = useState('gate'); 
+      const [activeMenu, setActiveMenu] = useState('tutorial'); // Default diubah ke 'tutorial'
+      const [userEmail, setUserEmail] = useState('');
+      const [previewImage, setPreviewImage] = useState(null);
+      const [supabaseConfig, setSupabaseConfig] = useState({ url: 'https://umycaltqlxonkcbnbwxu.supabase.co', key: 'sb_publishable_aV-O7g-jSwwxoxQ-NVxOew_lHQPpIGi', adminPass: 'adgen123' });
+      const [productImages, setProductImages] = useState([]);
+      const [mainProductId, setMainProductId] = useState(null);
+      const [productBrand, setProductBrand] = useState('');
+      const [productDesc, setProductDesc] = useState('');
+      const [productCategory, setProductCategory] = useState('Fashion');
+      const [modelMode, setModelMode] = useState('ai'); 
+      const [uploadedModel, setUploadedModel] = useState(null);
+      const [modelDescription, setModelDescription] = useState('Putri, wanita muda wajah oval, memakai kaos berwarna pink'); 
+      const [generatedModel, setGeneratedModel] = useState(null);
+      const [isGeneratingModel, setIsGeneratingModel] = useState(false);
+      const [isAnalyzingModel, setIsAnalyzingModel] = useState(false); 
+      const [isGeneratingStrategies, setIsGeneratingStrategies] = useState(false);
+      const [adStrategies, setAdStrategies] = useState([]);
+      const [progress, setProgress] = useState('');
+      const [transformPrompt, setTransformPrompt] = useState('');
+      const [beforeImage, setBeforeImage] = useState(null);
+      const [isTransforming, setIsTransforming] = useState(false);
+      const [transformResults, setTransformResults] = useState(null); 
+
+      // --- State untuk SINGLE SCENE Generator ---
+      const [ytcProductInput, setYtcProductInput] = useState('');
+      const [ytcAdType, setYtcAdType] = useState('Bite Driven Ads');
+      const [ytcGeneratedPrompt, setYtcGeneratedPrompt] = useState('');
+      const [isGeneratingYtc, setIsGeneratingYtc] = useState(false);
+      
+      // --- Fitur Baru Prompt YTC (Dialog & Negative Prompt) ---
+      const [ytcHasDialog, setYtcHasDialog] = useState(false);
+      const [ytcDialogInput, setYtcDialogInput] = useState('');
+      const [ytcSpeakerType, setYtcSpeakerType] = useState('Model'); // Model atau Narrator
+      const [ytcHasNegativePrompt, setYtcHasNegativePrompt] = useState(false);
+
+      // --- Fitur Baru Prompt YTC (Model Generator) ---
+      const [ytcModelInput, setYtcModelInput] = useState('');
+      const [ytcGeneratedModel, setYtcGeneratedModel] = useState(null);
+      const [isGeneratingYtcModel, setIsGeneratingYtcModel] = useState(false);
+
+      const categories = ["Fashion", "Makanan/Minuman", "Produk Kesehatan", "Produk Pembersih Rumah Tangga", "Skincare & Kosmetik", "Elektronik & Gadget", "Otomotif", "Kebutuhan Bayi", "Peralatan Dapur", "Lainnya"];
+      
+      const ytcAdTypes = [
+        "Bite Driven Ads", 
+        "Testimonial Ads", 
+        "Education Ads", 
+        "Motion Graphics", 
+        "Cinematic Storytelling", 
+        "Minimalist Brand Film", 
+        "Fun & Energetic Social Ad", 
+        "Product Unboxing Style",
+        "ASMR Focused Ad",
+        "Extreme Close-up Luxury",
+        "Deep Voice Cinematic Narration", 
+        "Cinematic Dark Voice", 
+        "Problem-Solution Hook",
+        "UGC Style Review",
+        "Fast-Paced Hype Ad",
+        "Lifestyle Aesthetic Story",
+        "Corporate Professional Pitch",
+        "Story-Driven Emotional Ad",
+        "Comparison/Side-by-Side",
+        "Limited Time Offer (FOMO)",
+        "Educational How-to Guide",
+        "Abstract Artistic Expression",
+        "Customer Transformation Journey"
+      ];
+
+      useEffect(() => {
+        if (ytcAdType === 'Cinematic Dark Voice') {
+          setYtcSpeakerType('Narrator');
+        }
+      }, [ytcAdType]);
+
+      const fileToBase64 = (file) => new Promise(r => { const rd = new FileReader(); rd.readAsDataURL(file); rd.onload = () => r(rd.result); });
+      const handleProductUpload = (e) => { const files = Array.from(e.target.files); const newImages = files.map(f => ({ id: Math.random().toString(36).substr(2, 9), file: f, url: URL.createObjectURL(f) })); setProductImages(prev => { const combined = [...prev, ...newImages].slice(0, 3); if (!mainProductId && combined.length > 0) setMainProductId(combined[0].id); return combined; }); };
+      const handleModelUpload = async (e) => { const file = e.target.files[0]; if (file) { setUploadedModel({ file, url: URL.createObjectURL(file) }); setIsAnalyzingModel(true); const b64 = await fileToBase64(file); const desc = await GeminiAPI.analyzeImage("Analyze person: [Name], [physic], [clothing]", b64); setModelDescription(desc || "Persona..."); setIsAnalyzingModel(false); } };
+      const generateAiModel = async () => { if (!modelDescription) return; setIsGeneratingModel(true); const res = await GeminiAPI.generateImage(`Medium studio shot of ${modelDescription}, bright professional lighting, plain background`); if (res) setGeneratedModel(res); setIsGeneratingModel(false); };
+      
+      const handleGenerateStrategies = async () => {
+        if (!productBrand || productImages.length === 0) return;
+        setIsGeneratingStrategies(true);
+        setAdStrategies([]); // Reset state
+        setProgress('Merancang Strategi...');
+        const prompt = `Buat 4 strategi iklan JSON untuk "${productBrand}" (${productCategory}). Deskripsi: "${productDesc}". Model: "${modelDescription}". Output dalam JSON murni: [{"style": "...", "scripts": ["...","...","..."], "dialogues": ["...","...","..."]}].`;
+        try {
+          const resText = await GeminiAPI.generateText(prompt);
+          const jsonStr = resText.match(/\[[\s\S]*\]/)?.[0];
+          if (jsonStr) {
+            const strategies = JSON.parse(jsonStr);
+            if (Array.isArray(strategies)) {
+              setAdStrategies(strategies);
+            } else if (typeof strategies === 'object') {
+              setAdStrategies([strategies]); 
+            }
+          }
+        } catch (e) { 
+          console.error("Error parsing JSON:", e); 
+          setProgress('Gagal memproses data. Coba lagi.');
+        } finally {
+          setIsGeneratingStrategies(false);
+          if (adStrategies.length === 0) setProgress('');
+        }
+      };
+
+      const handleTransformation = async () => {
+        if (!transformPrompt) return;
+        setIsTransforming(true); setTransformResults(null);
+        try {
+          let b64Before = beforeImage ? await fileToBase64(beforeImage.file) : await GeminiAPI.generateImage(`Initial raw state for: ${transformPrompt}`);
+          const b64Middle = await GeminiAPI.editImage(`Highly realistic construction in progress showing scaffoldings and skeletal structure for: ${transformPrompt}`, b64Before);
+          const b64After = await GeminiAPI.editImage(`COMPLETE and FINISHED architecture masterpiece of: ${transformPrompt}`, b64Middle);
+          
+          const videoPromptText = await GeminiAPI.generateText(`
+            Create a professional high-end cinematic video generation prompt (MAX 900 characters) in English.
+            The prompt should describe a visual transition or time-lapse of the building process:
+            1. Start from the original state/land: "${transformPrompt}".
+            2. Show a realistic construction phase with scaffolding, machinery, and rising structure.
+            3. End with the completed finished masterpiece as seen in the third image.
+            MANDATE: No text, no captions, hyper-realistic, 8k resolution, cinematic lighting.
+          `);
+          
+          setTransformResults({ before: b64Before, middle: b64Middle, after: b64After, prompt: videoPromptText.trim().substring(0, 900) });
+        } catch (err) { console.error(err); }
+        setIsTransforming(false);
+      };
+
+      const handleGenerateYtc = async () => {
+        if (!ytcProductInput) return;
+        setIsGeneratingYtc(true);
+        
+        let dialogPromptPart = "";
+        if (ytcHasDialog && ytcDialogInput) {
+          const voStyle = ytcAdType === 'Cinematic Dark Voice' 
+            ? ' using "Authoritative male voice, full bass, deep, like a movie trailer voice over" style' 
+            : '';
+          
+          dialogPromptPart = ` including a ${ytcSpeakerType} speaking these words in Indonesian: "${ytcDialogInput}"${voStyle}. Ensure the speaker's role is correctly integrated into the prompt.`;
+        }
+
+        const systemPrompt = `You are a specialized prompt engineer for YouTube Create. 
+        Your task is to summarize the user's product description into a clear product identity and put it EXACTLY into this template: 
+        "Create a video advertisement for [Product] in [Style] style with voice over or dialogue in Indonesian."
+        
+        STRICT RULES:
+        1. Result MUST be in English.
+        2. Result MUST be exactly ONE sentence.
+        3. Do NOT include visual details, lighting, camera angles, or scenes. 
+        4. Only return the final string.
+        ${ytcHasDialog ? `5. Incorporate the Indonesian dialogue for the ${ytcSpeakerType} into that single sentence template.` : ''}`;
+        
+        const userPrompt = `Product Details: ${ytcProductInput}. Ad Style: ${ytcAdType}.${dialogPromptPart}`;
+        try {
+          const resText = await GeminiAPI.generateText(`${systemPrompt}\n\nUser Input: ${userPrompt}`);
+          let cleaned = resText.trim().replace(/^"|"$/g, '');
+          
+          if (ytcHasNegativePrompt) {
+            cleaned += " clean realistic footage only, stable camera, natural human movement, physically accurate motion, zero graphic elements, absolutely no readable or unreadable text anywhere in the frame.";
+          }
+
+          if (ytcAdType === 'Cinematic Dark Voice') {
+            cleaned += " voice over : Authoritative male voice, full bass, deep, like a movie trailer voice over.";
+          }
+          
+          setYtcGeneratedPrompt(cleaned.substring(0, 900));
+        } catch (err) {
+          console.error(err);
+        }
+        setIsGeneratingYtc(false);
+      };
+
+      const handleGenerateYtcModel = async () => {
+        if (!ytcModelInput) return;
+        setIsGeneratingYtcModel(true);
+        try {
+          const res = await GeminiAPI.generateImage(`High quality professional commercial photography of ${ytcModelInput}, center focus, masterpiece lighting, sharp details, plain high-end studio background`);
+          if (res) setYtcGeneratedModel(res);
+        } catch (err) {
+          console.error(err);
+        }
+        setIsGeneratingYtcModel(false);
+      };
+
+      if (view === 'admin') return <AdminPanel config={supabaseConfig} setConfig={setSupabaseConfig} onBack={() => setView('gate')} />;
+      if (view === 'gate') return <LoginGate config={supabaseConfig} onLoginSuccess={e => {setUserEmail(e); setView('app');}} onOpenAdmin={() => setView('admin')} />;
+
+      const canGenerateStrategy = productImages.length > 0 && ((modelMode === 'ai' && generatedModel) || (modelMode === 'upload' && uploadedModel));
+
+      return (
+        <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800 font-sans selection:bg-indigo-100 overflow-x-hidden">
+          <header className="bg-white border-b border-slate-200 sticky top-0 z-50 h-16 flex items-center justify-between px-4 md:px-6">
+            <div className="flex items-center gap-4 md:gap-8 flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white"><Icon name="sparkles" size={18} /></div>
+                <h1 className="text-lg md:text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-purple-600 hidden sm:block">YTC GATE</h1>
+              </div>
+              
+              <nav className="flex bg-slate-100 p-1 rounded-xl overflow-x-auto no-scrollbar max-w-[calc(100vw-120px)] sm:max-w-none">
+                <div className="flex gap-1 whitespace-nowrap">
+                  <button onClick={() => setActiveMenu('tutorial')} className={`px-3 md:px-4 py-2 text-[10px] font-bold rounded-lg transition-all flex items-center gap-2 flex-shrink-0 ${activeMenu === 'tutorial' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>
+                    <Icon name="playCircle" size={14} className={activeMenu === 'tutorial' ? 'text-blue-500' : 'text-slate-400'} /> TUTORIAL
+                  </button>
+                </div>
+              </nav>
+            </div>
+            <button onClick={() => setView('gate')} className="p-2 text-slate-300 hover:text-red-500 transition-colors flex-shrink-0"><Icon name="logOut" size={20} /></button>
+          </header>
+
+          {/* VIEW: TUTORIAL */}
+          {activeMenu === 'tutorial' && (
+            <main className="flex-grow w-full max-w-5xl mx-auto p-4 md:p-6 animate-fadeIn overflow-x-hidden text-gray-900">
+               {/* Header & Hero */}
+               <header className="bg-gradient-to-br from-blue-900 to-blue-500 text-white py-12 px-4 text-center rounded-3xl mb-8 shadow-xl">
+                   <h1 className="text-4xl md:text-5xl font-bold mb-4">YTC GATE</h1>
+                   <p className="text-xl opacity-90">Bikin Konten Affiliate dengan AI seperti Bukan AI</p>
+               </header>
+                   <h1 className="text-4xl md:text-5xl font-bold mb-4">WAJIB DIBACA</h1>
+                   <p className="text-xl opacity-90">Tonton Video Tutor sampai selesai, scrol kebawah download aplikasi dan file pendukungnya, scrol kebawah masuk ke grup support</p>
+
+               {/* Video Tutorial Utama */}
+               <section className="bg-white p-6 rounded-2xl shadow-xl mb-12 border-2 border-red-100">
+                   <div className="mb-6">
+                       <h2 className="text-2xl font-bold text-red-600 mb-2 flex items-center">
+                           <span className="mr-2">📺</span> WAJIB DITONTON: Video Tutorial Install
+                       </h2>
+                       <p className="text-gray-600 italic text-sm">HARAP TONTON VIDEO SAMPAI SELESAI,AGAR TIDAK ERROR SAAT INSTALL.Klik pada video untuk layar yang lebih besar.</p>
+                   </div>
+                   
+                   <div className="relative aspect-video rounded-xl overflow-hidden bg-black shadow-lg mb-4">
+                       <iframe 
+                           src="https://www.youtube.com/embed/r6jXSedzaGw?autoplay=1&mute=1&rel=0" 
+                           title="YouTube video player" 
+                           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+                           allowFullScreen
+                           className="absolute top-0 left-0 w-full h-full border-0"
+                       ></iframe>
+                   </div>
+
+                   <div className="flex flex-col sm:flex-row justify-center gap-3">
+                       <a href="https://www.youtube.com/watch?v=r6jXSedzaGw" target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white px-5 py-2 rounded-lg font-semibold text-sm transition shadow-md">
+                           <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M19.615 3.184c-3.604-.246-11.631-.245-15.23 0-3.897.266-4.356 2.62-4.385 8.816.029 6.185.484 8.549 4.385 8.816 3.6.245 11.626.246 15.23 0 3.897-.266 4.356-2.62 4.385-8.816-.029-6.185-.484-8.549-4.385-8.816zm-10.615 12.816v-8l8 4-8 4z"/></svg>
+                           Buka di Aplikasi YouTube
+                       </a>
+                       <p className="text-[10px] text-gray-400 self-center">Klik ikon speaker pada video untuk menyalakan suara.</p>
+                   </div>
+               </section>
+
+               {/* Tutorial Manual */}
+               <section className="mb-12">
+                   <h2 className="text-3xl font-bold mb-8 text-center text-gray-800">Tutorial Manual Instal</h2>
+                   <div className="grid md:grid-cols-2 gap-6">
+                       
+                       {/* Langkah 1 & 2 */}
+                       <div className="bg-white/90 backdrop-blur-md p-6 rounded-xl shadow-sm border border-gray-200 border-t-4 border-t-blue-600">
+                           <span className="inline-block bg-blue-600 text-white px-3 py-1 rounded-full text-xs font-bold mb-4 uppercase tracking-wider">Langkah 1 & 2</span>
+                           <h3 className="text-xl font-bold mb-3">APKMirror & File YTC</h3>
+                           <p className="text-sm text-gray-600 mb-4 leading-relaxed">Instal APKMirror dari PlayStore terlebih dahulu, kemudian unduh file YTC sesuai dengan versi Android ponsel Anda (Lihat Di Pengaturan-Tentang Ponsel/Telepon)dan buka file ytc.apkm dengan apk mirror.</p>
+                           <div className="space-y-3">
+                               <a href="https://play.google.com/store/apps/details?id=com.apkmirror.helper.prod" target="_blank" rel="noreferrer" className="block w-full text-center py-3 px-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold transition">Install APKMirror Helper</a>
+                               <div className="pt-2 border-t border-gray-100">
+                                   <p className="text-[10px] text-gray-400 font-bold mb-2 uppercase">Download File YTC:</p>
+                                   <a href="https://mega.nz/file/26IUCATB#60e7B0HhHWNx5OcRSf_aaYoR7VGNTy0TXcj3jIGj0n0" target="_blank" rel="noreferrer" className="block w-full text-center py-2 px-4 bg-gray-800 hover:bg-black text-white rounded-lg text-sm mb-2 transition">YTC Android Versi 10</a>
+                                   <a href="https://mega.nz/file/ejQEDIrI#TpHo0ydljistZf4tVrjli5SkSfSUXiOBJG4MQQzkVTQ" target="_blank" rel="noreferrer" className="block w-full text-center py-2 px-4 bg-gray-800 hover:bg-black text-white rounded-lg text-sm transition">YTC Android Versi 12+</a>
+                               </div>
+                           </div>
+                       </div>
+
+                       {/* Langkah 3 & 4 */}
+                       <div className="bg-white/90 backdrop-blur-md p-6 rounded-xl shadow-sm border border-gray-200 border-t-4 border-t-blue-600">
+                           <span className="inline-block bg-blue-600 text-white px-3 py-1 rounded-full text-xs font-bold mb-4 uppercase tracking-wider">Langkah 3 & 4</span>
+                           <h3 className="text-xl font-bold mb-3">VPN & Konfigurasi</h3>
+                           <p className="text-sm text-gray-600 mb-4 leading-relaxed">Instal salah satu VPN di bawah ini. Buka VPN dan <strong className="font-bold text-gray-900">pilih lokasi server India atau United State (Amerika)</strong> sebelum menjalankan aplikasi YouTube Create.</p>
+                           <div className="space-y-3">
+                               <a href="https://mega.nz/file/PnoyDJoQ#Kl8VAHSfAlkrB7MTVwkekWwE8u2fPQmi_jNMi1iEpxw" target="_blank" rel="noreferrer" className="block w-full text-center py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition">Download VPNS Unlimited</a>
+                               <a href="https://mega.nz/file/3yxUxYpa#g_B_Ygwnu97mxehrqd4kqTgq8i78rJ5wzJYu_Ika--s" target="_blank" rel="noreferrer" className="block w-full text-center py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition">Download Fire VPN</a>
+                           </div>
+                       </div>
+                   </div>
+
+                   {/* Cara Penggunaan */}
+                   <div className="mt-8 bg-blue-50 border-l-4 border-blue-600 p-6 rounded-r-xl shadow-inner">
+                       <h3 className="text-lg font-bold mb-3 text-blue-900">Alur Kerja (Workflow):</h3>
+                       <ul className="list-disc ml-5 space-y-2 text-gray-700 text-sm">
+                           <li>Aktifkan VPN (Server India / Amerika).</li>
+                           <li>Buka <strong className="font-bold">YouTube Create</strong> &gt; Klik <strong className="font-bold">Buat Video</strong>.</li>
+                           <li>Upload maksimal 3 gambar produk Anda.</li>
+                           <li>Masukkan prompt sederhana (AI akan bekerja otomatis).</li>
+                           <li>Jika hasil kurang memuaskan, klik <strong className="font-bold">'Buat Lagi'</strong>. Jika sudah oke, klik <strong className="font-bold">'Gunakan Video'</strong>.</li>
+                       </ul>
+                   </div>
+               </section>
+
+               {/* Bonus & Support */}
+               <section className="bg-gray-900 text-white rounded-2xl p-10 mb-12 text-center shadow-2xl">
+                   <h2 className="text-2xl font-bold mb-4 uppercase tracking-widest">Akses Tambahan & Support</h2>
+                   <div className="flex flex-wrap justify-center gap-4">
+                       <a href="https://gemini.google.com/share/adb292220fa3" target="_blank" rel="noreferrer" className="bg-yellow-500 hover:bg-yellow-600 text-gray-900 px-8 py-3 rounded-full font-bold transition-all transform hover:scale-105">Bonus YTC Prompt Generator</a>
+                       <a href="https://youtu.be/6r_4dlxmDao" target="_blank" rel="noreferrer" className="bg-red-600 hover:bg-red-700 text-white px-8 py-3 rounded-full font-bold transition-all transform hover:scale-105">Tutorial Buat Prompt</a>
+                       <a href="https://youtube.com/shorts/NC7OKoJwdC4" target="_blank" rel="noreferrer" className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-full font-bold transition-all transform hover:scale-105">Cara Daftar Affiliate</a>
+                       <a href="https://chat.whatsapp.com/FF7z9UF1GM1CWPq8jc5aud" target="_blank" rel="noreferrer" className="bg-green-500 hover:bg-green-600 text-white px-8 py-3 rounded-full font-bold transition-all transform hover:scale-105">Grup WA Support</a>
+                   </div>
+               </section>
+
+               {/* Menu & Fitur Utama */}
+               <section className="mb-12">
+                   <h2 className="text-center font-bold text-gray-500 text-xs tracking-[0.2em] mb-6 uppercase">Pilihan Menu di YTC Prompt Generator</h2>
+                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                       <div className="p-5 bg-white border border-blue-100 rounded-xl text-center shadow-sm">
+                           <h4 className="font-bold text-blue-800 mb-1">SINGLE SCENE</h4>
+                           <p className="text-[11px] text-gray-500">Membuat video otomatis hanya dengan satu adegan utama.</p>
+                       </div>
+                       <div className="p-5 bg-white border border-blue-100 rounded-xl text-center shadow-sm">
+                           <h4 className="font-bold text-blue-800 mb-1">CONTINUOUS SCENE</h4>
+                           <p className="text-[11px] text-gray-500">Membuat rangkaian video berkelanjutan sesuai keinginan Anda.</p>
+                       </div>
+                       <div className="p-5 bg-white border border-blue-100 rounded-xl text-center shadow-sm">
+                           <h4 className="font-bold text-blue-800 mb-1">TRANSFORMASI</h4>
+                           <p className="text-[11px] text-gray-500">Fitur khusus untuk video perubahan/transformasi produk.</p>
+                       </div>
+                   </div>
+               </section>
+
+               {/* Gaya Iklan Section */}
+               <section className="mb-12">
+                   <h2 className="text-3xl font-bold mb-4 text-center text-gray-900">Penjelasan Gaya Iklan</h2>
+                   <p className="text-center text-gray-500 mb-8 max-w-2xl mx-auto">Pilih gaya visual yang tepat agar promosi produk Anda terlihat profesional.</p>
+                   
+                   <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+                       <div className="bg-white p-5 rounded-xl border border-gray-200 hover:border-blue-300 transition-all hover:shadow-lg group">
+                           <div className="flex justify-between items-start mb-2">
+                               <h5 className="font-bold text-blue-900 group-hover:text-blue-600">BITE DRIVEN ADS</h5>
+                               <span className="text-xs bg-gray-100 px-2 py-1 rounded">Visual</span>
+                           </div>
+                           <p className="text-xs text-gray-600 leading-relaxed">Fokus pada satu momen paling menarik (misal: cokelat meleleh). Langsung menarik perhatian secara instan.</p>
+                       </div>
+                       <div className="bg-white p-5 rounded-xl border border-gray-200 hover:border-blue-300 transition-all hover:shadow-lg group">
+                           <div className="flex justify-between items-start mb-2">
+                               <h5 className="font-bold text-blue-900 group-hover:text-blue-600">TESTIMONIAL ADS</h5>
+                               <span className="text-xs bg-gray-100 px-2 py-1 rounded">Social Proof</span>
+                           </div>
+                           <p className="text-xs text-gray-600 leading-relaxed">Menampilkan pendapat pelanggan nyata. Membangun kepercayaan tinggi untuk produk kesehatan &amp; skincare.</p>
+                       </div>
+                       <div className="bg-white p-5 rounded-xl border border-gray-200 hover:border-blue-300 transition-all hover:shadow-lg group">
+                           <div className="flex justify-between items-start mb-2">
+                               <h5 className="font-bold text-blue-900 group-hover:text-blue-600">EDUCATION ADS</h5>
+                               <span className="text-xs bg-gray-100 px-2 py-1 rounded">Informative</span>
+                           </div>
+                           <p className="text-xs text-gray-600 leading-relaxed">Memberikan informasi bermanfaat sebelum jualan. Membuat audiens merasa dibantu sebelum membeli.</p>
+                       </div>
+                       <div className="bg-white p-5 rounded-xl border border-gray-200 hover:border-blue-300 transition-all hover:shadow-lg group">
+                           <div className="flex justify-between items-start mb-2">
+                               <h5 className="font-bold text-blue-900 group-hover:text-blue-600">MOTION GRAPHICS</h5>
+                               <span className="text-xs bg-gray-100 px-2 py-1 rounded">Tech</span>
+                           </div>
+                           <p className="text-xs text-gray-600 leading-relaxed">Animasi grafis dan teks bergerak. Sangat efektif untuk menjelaskan fitur aplikasi atau software.</p>
+                       </div>
+                       <div className="bg-white p-5 rounded-xl border border-gray-200 hover:border-blue-300 transition-all hover:shadow-lg group">
+                           <div className="flex justify-between items-start mb-2">
+                               <h5 className="font-bold text-blue-900 group-hover:text-blue-600">CINEMATIC STORY</h5>
+                               <span className="text-xs bg-gray-100 px-2 py-1 rounded">Emotional</span>
+                           </div>
+                           <p className="text-xs text-gray-600 leading-relaxed">Gaya film pendek dengan alur cerita mendalam. Meningkatkan nilai emosional sebuah brand premium.</p>
+                       </div>
+                       <div className="bg-white p-5 rounded-xl border border-gray-200 hover:border-blue-300 transition-all hover:shadow-lg group">
+                           <div className="flex justify-between items-start mb-2">
+                               <h5 className="font-bold text-blue-900 group-hover:text-blue-600">ASMR FOCUSED</h5>
+                               <span className="text-xs bg-gray-100 px-2 py-1 rounded">Sensory</span>
+                           </div>
+                           <p className="text-xs text-gray-600 leading-relaxed">Menonjolkan suara detail (renyah, gesekan). Memberikan pengalaman memuaskan secara audio-visual.</p>
+                       </div>
+                   </div>
+                   
+                   <p className="mt-6 text-center text-sm text-gray-400 italic">*Tersedia juga gaya lain: Minimalist, Unboxing, UGC Review, Hype Ad, dan Comparison.</p>
+               </section>
+
+            </main>
+          )}
+
+          {/* VIEW: SINGLE SCENE GENERATOR - ADA DI SOURCE CODE TAPI MENU DI SEMBUNYIKAN */}
+          {activeMenu === 'ytc' && (
+            <main className="flex-grow w-full max-w-7xl mx-auto p-4 md:p-6 animate-fadeIn overflow-x-hidden">
+              <div className="bg-white rounded-[2rem] md:rounded-[3rem] border border-slate-200 shadow-xl overflow-hidden">
+                <div className="bg-red-600 p-6 md:p-8 flex items-center justify-between text-white">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 md:w-12 md:h-12 bg-white/20 rounded-xl md:rounded-2xl flex items-center justify-center backdrop-blur-md">
+                       <Icon name="youtube" size={24} className="md:size-[28px]" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl md:text-2xl font-black uppercase tracking-tight">Single Scene Generator</h2>
+                      <p className="text-red-100 text-[8px] md:text-[10px] font-bold uppercase tracking-widest opacity-80">Optimized for YouTube Create Ads</p>
+                    </div>
+                  </div>
+                  <Icon name="sparkles" className="animate-pulse hidden sm:block" />
+                </div>
+
+                <div className="p-6 md:p-10 grid grid-cols-1 lg:grid-cols-12 gap-8 md:gap-12">
+                  <div className="lg:col-span-7 space-y-6 md:space-y-8">
+                    <div className="bg-slate-50 p-5 md:p-6 rounded-[2rem] md:rounded-[2.5rem] border border-slate-100 shadow-inner">
+                      <div className="flex items-center justify-between mb-4">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2 flex items-center gap-2">
+                          <Icon name="user" size={14} className="text-red-500" /> Karakter / Model AI (OPTIONAL)
+                        </label>
+                      </div>
+                      <div className="flex flex-col md:flex-row gap-4">
+                        <div className="flex-grow space-y-3 order-2 md:order-1">
+                          <textarea 
+                            value={ytcModelInput}
+                            onChange={(e) => setYtcModelInput(e.target.value)}
+                            placeholder="Contoh: Wanita Muda Indonesia, cantik, kulit cerah, berjilbab..."
+                            className="w-full bg-white border border-slate-200 rounded-xl md:rounded-2xl p-4 text-xs h-24 outline-none focus:ring-4 focus:ring-red-50 transition-all resize-none"
+                          />
+                          <button 
+                            onClick={handleGenerateYtcModel}
+                            disabled={isGeneratingYtcModel || !ytcModelInput}
+                            className="w-full py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-black transition-all"
+                          >
+                            {isGeneratingYtcModel ? <Icon name="loader2" size={14} className="animate-spin" /> : <Icon name="sparkles" size={14} />} 
+                            Buat Model AI
+                          </button>
+                        </div>
+                        
+                        <div className="w-full md:w-40 aspect-square bg-white border border-slate-200 rounded-xl md:rounded-2xl overflow-hidden relative group shadow-sm order-1 md:order-2">
+                          {isGeneratingYtcModel ? (
+                            <div className="w-full h-full flex items-center justify-center"><Icon name="loader2" size={24} className="animate-spin text-red-500" /></div>
+                          ) : ytcGeneratedModel ? (
+                            <>
+                              <img src={ytcGeneratedModel} className="w-full h-full object-cover" />
+                              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-all flex flex-col items-center justify-center gap-2 p-2">
+                                <button onClick={() => setPreviewImage(ytcGeneratedModel)} className="w-full py-1.5 bg-white/20 hover:bg-white/40 backdrop-blur-md rounded-lg text-[8px] font-bold text-white flex items-center justify-center gap-1">
+                                  <Icon name="eye" size={10}/> PREVIEW
+                                </button>
+                                <button onClick={handleGenerateYtcModel} className="w-full py-1.5 bg-white/20 hover:bg-white/40 backdrop-blur-md rounded-lg text-[8px] font-bold text-white flex items-center justify-center gap-1">
+                                  <Icon name="refreshCw" size={10}/> REGENERATE
+                                </button>
+                                <a href={ytcGeneratedModel} download="ai_model.png" className="w-full py-1.5 bg-red-600 hover:bg-red-700 rounded-lg text-[8px] font-bold text-white flex items-center justify-center gap-1">
+                                  <Icon name="download" size={10}/> DOWNLOAD
+                                </a>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="w-full h-full flex flex-col items-center justify-center opacity-10"><Icon name="user" size={40} /></div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2 flex items-center gap-2">
+                        <Icon name="box" size={14} className="text-red-500" /> Deskripsi Produk
+                      </label>
+                      <textarea 
+                        value={ytcProductInput}
+                        onChange={(e) => setYtcProductInput(e.target.value)}
+                        placeholder="Contoh: Sunlight, Sabun cuci piring yang mampu menghilangkan lemak membandel dalam sekali usap..."
+                        className="w-full bg-slate-50 border border-slate-100 rounded-[1.5rem] md:rounded-[2rem] p-5 md:p-6 text-sm min-h-[120px] outline-none focus:ring-4 focus:ring-red-50 transition-all resize-none shadow-inner"
+                      />
+                    </div>
+
+                    <div className="space-y-3">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2 flex items-center gap-2">
+                        <Icon name="layout" size={14} className="text-red-500" /> Jenis Iklan
+                      </label>
+                      <select 
+                        value={ytcAdType}
+                        onChange={(e) => setYtcAdType(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-100 rounded-xl md:rounded-2xl p-4 text-sm font-bold text-slate-700 outline-none focus:ring-4 focus:ring-red-50 transition-all appearance-none cursor-pointer"
+                        style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23EF4444' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 1rem center' }}
+                      >
+                        {ytcAdTypes.map(type => (
+                          <option key={type} value={type}>{type.toUpperCase()}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-4 pt-2">
+                      <div className="flex items-center gap-3 ml-2">
+                        <input 
+                          type="checkbox" 
+                          id="enableDialog" 
+                          checked={ytcHasDialog} 
+                          onChange={(e) => setYtcHasDialog(e.target.checked)}
+                          className="w-4 h-4 accent-red-600 rounded cursor-pointer"
+                        />
+                        <label htmlFor="enableDialog" className="text-[10px] font-black text-slate-700 uppercase tracking-widest cursor-pointer select-none">Aktifkan Dialog / Voice Over</label>
+                      </div>
+
+                      {ytcHasDialog && (
+                        <div className="bg-red-50/50 p-5 rounded-[2rem] border border-red-100 space-y-4 animate-fadeIn">
+                          <div className="flex items-center justify-between">
+                             <span className="text-[9px] font-black text-red-600 uppercase tracking-widest flex items-center gap-2"><Icon name="mic2" size={12}/> Siapa yang berbicara?</span>
+                             {ytcAdType !== 'Cinematic Dark Voice' ? (
+                               <div className="flex bg-white p-1 rounded-lg shadow-sm border border-red-100">
+                                 <button onClick={() => setYtcSpeakerType('Model')} className={`px-3 py-1 text-[8px] font-black rounded-md transition-all ${ytcSpeakerType === 'Model' ? 'bg-red-600 text-white' : 'text-slate-400'}`}>MODEL</button>
+                                 <button onClick={() => setYtcSpeakerType('Narrator')} className={`px-3 py-1 text-[8px] font-black rounded-md transition-all ${ytcSpeakerType === 'Narrator' ? 'bg-red-600 text-white' : 'text-slate-400'}`}>NARATOR</button>
+                               </div>
+                             ) : (
+                               <span className="text-[8px] font-black text-red-600 bg-white px-3 py-1 rounded-lg border border-red-100">NARATOR SAJA</span>
+                             )}
+                          </div>
+                          <textarea 
+                            value={ytcDialogInput}
+                            onChange={(e) => setYtcDialogInput(e.target.value)}
+                            placeholder={`Masukkan dialog yang diucapkan oleh ${ytcSpeakerType === 'Model' ? 'Model dalam video' : 'Narator iklan'}...`}
+                            className="w-full bg-white border border-red-100 rounded-2xl p-4 text-xs h-20 outline-none focus:ring-2 focus:ring-red-200 transition-all resize-none shadow-sm"
+                          />
+                          {ytcDialogInput.trim().split(/\s+/).filter(word => word.length > 0).length > 22 && (
+                            <p className="text-[10px] text-red-600 font-bold flex items-center gap-1 animate-pulse ml-2">
+                              <Icon name="alertCircle" size={12} /> Dialog Terlalu Panjang, Resiko Terpotong
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pt-2">
+                       <div className="flex items-center gap-3 ml-2">
+                        <input 
+                          type="checkbox" 
+                          id="enableNegative" 
+                          checked={ytcHasNegativePrompt} 
+                          onChange={(e) => setYtcHasNegativePrompt(e.target.checked)}
+                          className="w-4 h-4 accent-slate-800 rounded cursor-pointer"
+                        />
+                        <label htmlFor="enableNegative" className="text-[10px] font-black text-slate-700 uppercase tracking-widest cursor-pointer select-none flex items-center gap-2">
+                          <Icon name="alertCircle" size={14} className="text-amber-500" /> Negative Prompt
+                        </label>
+                      </div>
+                      {ytcHasNegativePrompt && (
+                        <div className="mt-3 ml-9 p-3 bg-slate-100 border border-slate-200 rounded-xl">
+                          <p className="text-[9px] text-slate-500 leading-relaxed font-medium italic">
+                            "clean realistic footage only, stable camera, natural human movement, physically accurate motion, zero graphic elements, absolutely no readable or unreadable text anywhere in the frame."
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    <button 
+                      onClick={handleGenerateYtc}
+                      disabled={isGeneratingYtc || !ytcProductInput}
+                      className="w-full py-4 md:py-5 bg-slate-900 text-white rounded-[1.5rem] md:rounded-[2rem] font-black uppercase tracking-[0.2em] flex items-center justify-center gap-3 shadow-2xl hover:bg-black transition-all disabled:opacity-50 disabled:cursor-not-allowed group"
+                    >
+                      {isGeneratingYtc ? <Icon name="loader2" size={20} className="animate-spin" /> : <Icon name="send" size={20} className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />}
+                      Buat Single Scene
+                    </button>
+                  </div>
+
+                  <div className="lg:col-span-5">
+                    <div className="bg-slate-900 rounded-[2rem] md:rounded-[2.5rem] p-6 md:p-8 h-full flex flex-col min-h-[400px] md:min-h-[500px] shadow-2xl relative overflow-hidden">
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-red-600/10 rounded-full -mr-16 -mt-16 blur-3xl"></div>
+                      <div className="flex items-center justify-between mb-6 relative z-10">
+                        <span className="text-[10px] font-black text-red-500 uppercase tracking-[0.3em]">Single Scene Output</span>
+                        {ytcGeneratedPrompt && (
+                          <button 
+                            onClick={() => copyToClipboard(ytcGeneratedPrompt)}
+                            className="flex items-center gap-2 text-[10px] font-bold text-slate-400 hover:text-white transition-colors bg-white/5 px-3 py-1.5 rounded-full"
+                          >
+                            <Icon name="copy" size={12} /> COPY
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex-grow flex items-center justify-center relative z-10">
+                        {isGeneratingYtc ? (
+                          <div className="text-center space-y-4">
+                            <Icon name="loader2" size={40} className="text-red-600 animate-spin mx-auto" />
+                            <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest animate-pulse">AI is engineering your prompt...</p>
+                          </div>
+                        ) : ytcGeneratedPrompt ? (
+                          <div className="w-full text-slate-200 font-mono text-xs md:text-sm leading-relaxed p-5 md:p-6 border border-white/5 rounded-[1.5rem] md:rounded-[2rem] bg-white/5">
+                             {ytcGeneratedPrompt}
+                             <div className="mt-6 pt-6 border-t border-white/10 flex justify-between items-center">
+                                <span className="text-[10px] text-slate-500 font-bold uppercase">{ytcGeneratedPrompt.length} Characters</span>
+                                <div className="flex gap-1">
+                                   <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
+                                   <div className="w-1.5 h-1.5 rounded-full bg-red-500/50"></div>
+                                   <div className="w-1.5 h-1.5 rounded-full bg-red-500/20"></div>
+                                </div>
+                             </div>
+                          </div>
+                        ) : (
+                          <div className="text-center opacity-20">
+                            <Icon name="youtube" size={56} className="text-slate-400 mx-auto mb-4" />
+                            <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Awaiting Generation</p>
+                          </div>
+                        )}
+                      </div>
+                      <div className="mt-6 p-4 bg-white/5 rounded-2xl border border-white/5 relative z-10">
+                        <p className="text-[9px] text-slate-500 font-bold italic leading-relaxed">
+                          "Gunakan prompt di atas langsung pada aplikasi YouTube Create. Sistem telah menyisipkan instruksi voice-over Bahasa Indonesia secara otomatis."
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </main>
+          )}
+
+          {/* VIEW: CONTINUOUS SCENE - ADA DI SOURCE CODE TAPI MENU DI SEMBUNYIKAN */}
+          {activeMenu === 'adgen' && (
+            <main className="flex-grow w-full max-w-7xl mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-8 animate-fadeIn overflow-x-hidden">
+              <div className="lg:col-span-4 xl:col-span-3 space-y-6">
+                <section className="bg-white p-5 rounded-[2rem] shadow-sm border border-slate-200">
+                  <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center justify-between">1. Produk <Icon name="box" size={14} /></h2>
+                  <div className="grid grid-cols-3 gap-2 mb-4">
+                    {productImages.map(img => (
+                      <div key={img.id} onClick={() => setMainProductId(img.id)} className={`relative aspect-square rounded-xl md:rounded-2xl overflow-hidden border-2 transition-all ${mainProductId === img.id ? 'border-indigo-500 ring-4 ring-indigo-50' : 'border-slate-50'}`}><img src={img.url} className="w-full h-full object-cover" /><button onClick={(e) => { e.stopPropagation(); setProductImages(prev => prev.filter(i => i.id !== img.id)); }} className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full"><Icon name="x" size={8} /></button></div>
+                    ))}
+                    {productImages.length < 3 && <label className="aspect-square rounded-xl md:rounded-2xl border-2 border-dashed border-slate-200 flex items-center justify-center cursor-pointer hover:bg-slate-50"><Icon name="plus" size={20} className="text-slate-300" /><input type="file" onChange={handleProductUpload} className="hidden" multiple /></label>}
+                  </div>
+                  <div className="space-y-2">
+                    <input value={productBrand} onChange={e => setProductBrand(e.target.value)} placeholder="Nama Brand" className="w-full text-sm p-3 rounded-xl md:rounded-2xl bg-slate-50 border border-slate-100 outline-none" />
+                    <select value={productCategory} onChange={e => setProductCategory(e.target.value)} className="w-full text-sm p-3 rounded-xl md:rounded-2xl bg-slate-50 border border-slate-100">
+                       {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                    </select>
+                    <textarea value={productDesc} onChange={e => setProductDesc(e.target.value)} placeholder="Deskripsi Singkat" rows={2} className="w-full text-sm p-3 rounded-xl md:rounded-2xl bg-slate-50 border border-slate-100 outline-none resize-none" />
+                  </div>
+                </section>
+                <section className="bg-white p-5 rounded-[2rem] shadow-sm border border-slate-200">
+                  <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center justify-between">2. Persona <Icon name="user" size={14} /></h2>
+                  <div className="flex bg-slate-50 p-1 rounded-xl mb-4"><button onClick={() => setModelMode('ai')} className={`flex-1 py-2 text-[10px] font-bold rounded-lg ${modelMode === 'ai' ? 'bg-white shadow text-indigo-600' : 'text-slate-500'}`}>AI</button><button onClick={() => setModelMode('upload')} className={`flex-1 py-2 text-[10px] font-bold rounded-lg ${modelMode === 'upload' ? 'bg-white shadow text-indigo-600' : 'text-slate-500'}`}>UPLOAD</button></div>
+                  <div className="space-y-3">
+                    {modelMode === 'upload' ? (
+                      <label className="block w-full h-32 rounded-xl md:rounded-2xl border-2 border-dashed border-slate-200 flex items-center justify-center cursor-pointer overflow-hidden">{uploadedModel ? <img src={uploadedModel.url} className="w-full h-full object-cover" /> : <Icon name="plus" size={20} className="text-slate-300" />}<input type="file" onChange={handleModelUpload} className="hidden" /></label>
+                    ) : (
+                      <button onClick={generateAiModel} disabled={isGeneratingModel} className="w-full py-2.5 bg-slate-800 text-white text-[10px] font-bold rounded-xl">{isGeneratingModel ? <Icon name="loader2" size={14} className="animate-spin mx-auto" /> : 'BUAT MODEL AI'}</button>
+                    )}
+                    <textarea value={modelDescription} onChange={e => setModelDescription(e.target.value)} className="w-full text-xs p-3 rounded-xl md:rounded-2xl bg-slate-50 border border-slate-100 h-20 outline-none" placeholder="Deskripsi Model..." />
+                    {generatedModel && modelMode === 'ai' && (
+                      <div className="relative group">
+                        <img src={generatedModel} className="w-full h-32 object-cover rounded-xl md:rounded-2xl border border-slate-100" />
+                        <button onClick={() => setPreviewImage(generatedModel)} className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white rounded-xl md:rounded-2xl"><Icon name="eye" size={20}/></button>
+                      </div>
+                    )}
+                  </div>
+                </section>
+                <button onClick={handleGenerateStrategies} disabled={isGeneratingStrategies || !canGenerateStrategy} className={`w-full py-4 text-white rounded-[2rem] font-bold shadow-xl transition-all flex items-center justify-center gap-3 ${canGenerateStrategy ? 'bg-indigo-600 shadow-indigo-100 hover:brightness-110' : 'bg-slate-300'}`}>
+                  {isGeneratingStrategies ? <Icon name="loader2" size={20} className="animate-spin" /> : <Icon name="layout" size={20} />} <span className="uppercase tracking-widest text-[10px] md:text-xs">Rancang Iklan</span>
+                </button>
+                {progress && <p className="text-center text-[10px] font-bold text-indigo-600 animate-pulse uppercase tracking-widest mt-2">{progress}</p>}
+              </div>
+              <div className="lg:col-span-8 xl:col-span-9">
+                {adStrategies.length === 0 ? (
+                  <div className="h-full min-h-[400px] md:min-h-[500px] flex flex-col items-center justify-center bg-white rounded-[2rem] md:rounded-[3rem] border border-slate-200 shadow-inner text-slate-400 p-8 md:p-12 text-center">
+                    <Icon name="listChecks" size={40} className="opacity-10 mb-4" />
+                    <h3 className="text-lg md:text-xl font-bold text-slate-900">Storyboard Strategi</h3>
+                    <p className="text-sm mt-2 max-w-sm">Isi detail produk dan persona di panel kiri untuk merancang strategi storyboard otomatis.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-8 md:space-y-12 pb-20">
+                    {adStrategies.map((strat, idx) => (
+                      <StrategyCard key={idx} strategy={strat} index={idx} productImages={productImages} mainProductId={mainProductId} modelMode={modelMode} uploadedModel={uploadedModel} generatedModel={generatedModel} productBrand={productBrand} modelDescription={modelDescription} onUpdateImages={(i, imgs) => setAdStrategies(prev => prev.map((s, idx) => idx === i ? {...s, images: imgs} : s))} onPreview={setPreviewImage} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </main>
+          )}
+
+          {/* VIEW: TRANSFORMASI - ADA DI SOURCE CODE TAPI MENU DI SEMBUNYIKAN */}
+          {activeMenu === 'transform' && (
+            <main className="flex-grow w-full max-w-7xl mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-8 animate-fadeIn overflow-x-hidden">
+              <div className="lg:col-span-4 xl:col-span-3 space-y-6">
+                <section className="bg-white p-5 md:p-6 rounded-[2rem] shadow-sm border border-slate-200">
+                  <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center justify-between">Upload Gambar Awal <Icon name="image" size={14} /></h2>
+                  <label className="block w-full h-32 rounded-xl md:rounded-2xl border-2 border-dashed border-slate-200 flex items-center justify-center cursor-pointer overflow-hidden mb-6 relative group bg-slate-50 hover:bg-slate-100 transition-all shadow-inner">
+                    {beforeImage ? (
+                      <>
+                        <img src={beforeImage.url} className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                           <button onClick={(e) => { e.preventDefault(); setBeforeImage(null); }} className="p-2 bg-red-500 text-white rounded-full"><Icon name="x" size={14}/></button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-center space-y-1">
+                        <Icon name="upload" size={24} className="text-slate-300 mx-auto" />
+                        <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest">Pilih Gambar</span>
+                      </div>
+                    )}
+                    <input type="file" onChange={(e) => {
+                      const file = e.target.files[0];
+                      if(file) setBeforeImage({ file, url: URL.createObjectURL(file) });
+                    }} className="hidden" accept="image/*" />
+                  </label>
+
+                  <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center justify-between">Proyek Bangunan <Icon name="building" size={14} /></h2>
+                  <div className="space-y-4">
+                    <textarea value={transformPrompt} onChange={e => setTransformPrompt(e.target.value)} rows={4} placeholder="Contoh: Modern Villa with pool" className="w-full text-sm p-3 rounded-xl md:rounded-2xl bg-slate-50 border border-slate-100 outline-none shadow-inner resize-none focus:bg-white transition-all" />
+                    <button onClick={handleTransformation} disabled={isTransforming || !transformPrompt} className="w-full py-4 bg-indigo-600 text-white rounded-xl md:rounded-2xl font-bold shadow-lg flex items-center justify-center gap-3 hover:bg-indigo-700 transition-all disabled:opacity-50">
+                      {isTransforming ? <Icon name="loader2" size={18} className="animate-spin" /> : <Icon name="arrowRightLeft" size={18} />} <span className="uppercase tracking-widest text-[10px] md:text-xs">Proses</span>
+                    </button>
+                  </div>
+                </section>
+              </div>
+              <div className="lg:col-span-8 xl:col-span-9">
+                {transformResults ? (
+                  <div className="space-y-8">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-fadeIn">
+                      {['before', 'middle', 'after'].map((stage, i) => (
+                        <div key={stage} className="space-y-3">
+                          <div className="flex items-center justify-between px-2">
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                              {stage === 'before' ? 'Original' : stage === 'middle' ? 'Gambar 1: Proses' : 'Gambar 2: Selesai'}
+                            </span>
+                          </div>
+                          <div className="relative group aspect-square bg-white rounded-[1.5rem] md:rounded-[2rem] border border-slate-200 overflow-hidden shadow-sm hover:shadow-xl transition-all">
+                            <img src={transformResults[stage]} className="w-full h-full object-cover" />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+                              <button onClick={() => setPreviewImage(transformResults[stage])} className="p-3 bg-white/20 backdrop-blur-md rounded-full text-white hover:bg-white/40"><Icon name="eye" size={20}/></button>
+                              <a href={transformResults[stage]} download={`transition_${stage}.png`} className="p-3 bg-white/20 backdrop-blur-md rounded-full text-white hover:bg-white/40"><Icon name="download" size={20}/></a>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    
+                    <div className="bg-slate-900 rounded-[2rem] p-6 md:p-8 shadow-2xl relative overflow-hidden animate-fadeIn">
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full -mr-16 -mt-16 blur-3xl"></div>
+                      <div className="flex items-center justify-between mb-6 relative z-10">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white"><Icon name="clapperboard" size={16} /></div>
+                          <span className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.3em]">AI Video Building Prompt</span>
+                        </div>
+                        <button 
+                          onClick={() => copyToClipboard(transformResults.prompt)}
+                          className="flex items-center gap-2 text-[10px] font-bold text-slate-400 hover:text-white transition-colors bg-white/5 px-3 py-1.5 rounded-full border border-white/10"
+                        >
+                          <Icon name="copy" size={12} /> COPY
+                        </button>
+                      </div>
+                      <div className="relative z-10">
+                        <div className="w-full text-slate-200 font-mono text-xs md:text-sm leading-relaxed p-5 md:p-6 border border-white/5 rounded-[1.5rem] bg-white/5">
+                           {transformResults.prompt}
+                           <div className="mt-6 pt-6 border-t border-white/10 flex justify-between items-center">
+                              <span className="text-[10px] text-slate-500 font-bold uppercase">{transformResults.prompt.length} Characters</span>
+                              <div className="flex gap-1">
+                                 <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div>
+                                 <div className="w-1.5 h-1.5 rounded-full bg-indigo-500/50"></div>
+                                 <div className="w-1.5 h-1.5 rounded-full bg-indigo-500/20"></div>
+                              </div>
+                           </div>
+                        </div>
+                        <p className="mt-4 text-[9px] text-slate-500 font-bold italic leading-relaxed text-center px-4">
+                          "Gunakan prompt di atas pada AI Video Generator untuk menghasilkan video transisi pembangunan yang selaras dengan gambar di atas."
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="h-full min-h-[400px] flex flex-col items-center justify-center bg-white rounded-[2rem] md:rounded-[3rem] border border-slate-200 shadow-inner text-slate-300 p-12 text-center">
+                     {isTransforming ? (
+                       <div className="space-y-4">
+                         <Icon name="loader2" size={48} className="animate-spin text-indigo-500 mx-auto" />
+                         <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600 animate-pulse">AI Sedang Merancang Bangunan & Prompt Video...</p>
+                       </div>
+                     ) : (
+                       <div className="space-y-4 opacity-30">
+                         <Icon name="building" size={64} className="mx-auto" />
+                         <p className="text-sm font-bold max-w-xs">Upload foto lahan/bangunan dan masukkan deskripsi untuk melihat transformasi AI.</p>
+                       </div>
+                     )}
+                  </div>
+                )}
+              </div>
+            </main>
+          )}
+
+          <footer className="bg-white border-t border-slate-200 mt-auto py-6 md:py-8 px-4 md:px-6">
+            <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
+              <div className="flex flex-col gap-1 items-center md:items-start">
+                <div className="flex items-center gap-2 text-indigo-600 font-bold text-sm">
+                  <Icon name="sparkles" size={16} /> YTC GATE V.1.03.01
+                </div>
+                <p className="text-[10px] text-slate-400 font-medium">© 2026 YTC GATE Enterprise. Semua hak cipta dilindungi.</p>
+              </div>
+              <div className="flex items-center gap-4 md:gap-8">
+                <div className="flex flex-col items-center md:items-end gap-1">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Sistem Status</span>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
+                    <span className="text-[10px] font-bold text-slate-900">AI Active</span>
+                  </div>
+                </div>
+                <div className="h-8 w-[1px] bg-slate-100"></div>
+                <div className="flex flex-col items-center md:items-end gap-1">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Keamanan</span>
+                  <div className="flex items-center gap-1.5">
+                    <Icon name="shield" size={12} className="text-indigo-500" />
+                    <span className="text-[10px] font-bold text-slate-900">Encrypted</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-4 justify-center">
+                <button className="text-[9px] font-bold text-slate-400 hover:text-indigo-600 transition-colors uppercase">Privasi</button>
+                <button className="text-[9px] font-bold text-slate-400 hover:text-indigo-600 transition-colors uppercase">Syarat</button>
+                <button className="text-[9px] font-bold text-slate-400 hover:text-indigo-600 transition-colors uppercase">Bantuan</button>
+              </div>
+            </div>
+          </footer>
+          <ImagePreviewModal url={previewImage} onClose={() => setPreviewImage(null)} />
+        </div>
+      );
+    }
+
+    // Melakukan render aplikasi
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
