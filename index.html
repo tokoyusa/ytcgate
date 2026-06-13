@@ -47,7 +47,7 @@
     };
 
     // --- KONFIGURASI API (GEMINI) ---
-    const geminiApiKey = ""; 
+    const apiKey = ""; 
 
     const GeminiAPI = {
       callWithRetry: async (fn, retries = 5) => {
@@ -59,7 +59,7 @@
         }
       },
       generateText: async (prompt) => {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${geminiApiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
         const fetchTask = async () => {
           const res = await fetch(url, { 
             method: 'POST', 
@@ -72,7 +72,7 @@
         return await GeminiAPI.callWithRetry(fetchTask);
       },
       analyzeImage: async (prompt, base64Image) => {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${geminiApiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
         const cleanBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
         const payload = {
           contents: [{
@@ -91,7 +91,7 @@
         return await GeminiAPI.callWithRetry(fetchTask);
       },
       generateImage: async (promptText) => {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${geminiApiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`;
         const enhancedPrompt = `${promptText}, ultra high definition, 8k, sharp focus, cinematic lighting, masterpiece, hyper-realistic details, no text, no labels, no subtitles`;
         const payload = { instances: { prompt: enhancedPrompt }, parameters: { sampleCount: 1 } };
         const fetchTask = async () => {
@@ -104,7 +104,7 @@
         return await GeminiAPI.callWithRetry(fetchTask);
       },
       editImage: async (prompt, base64Product, base64ModelRef = null) => {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${geminiApiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${apiKey}`;
         const qualityPrompt = `${prompt}. 
           LOCKED VISUAL IDENTITY MANDATE: 
           1. THE PRODUCT IN THE SCENE MUST BE A 100% PIXEL-PERFECT CLONE OF THE PROVIDED PRODUCT IMAGE. 
@@ -371,10 +371,6 @@
         <div className="fixed inset-0 bg-slate-900 flex items-center justify-center p-4 z-50">
           <div className="bg-white w-full max-w-md rounded-3xl p-8 space-y-6">
             <div className="text-center"><div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-white mx-auto mb-4"><Icon name="shieldCheck" size={32} /></div><h1 className="text-2xl font-bold">TUTOR YTC</h1></div>
-            <div className="flex bg-slate-100 p-1 rounded-xl">
-              <button onClick={() => setMode('user')} className={`flex-1 py-2 text-[10px] font-bold rounded-lg ${mode === 'user' ? 'bg-white shadow text-indigo-600' : ''}`}>USER EMAIL</button>
-              <button onClick={() => setMode('admin')} className={`flex-1 py-2 text-[10px] font-bold rounded-lg ${mode === 'admin' ? 'bg-white shadow text-indigo-600' : ''}`}>ADMIN</button>
-            </div>
             <form onSubmit={handleLogin} className="space-y-4">
               <input type="text" required value={identifier} onChange={e => setIdentifier(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm" placeholder="Masuk dengan email saat Checkout" />
               {mode === 'admin' && <input type="password" required value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm" placeholder="Password" />}
@@ -638,7 +634,7 @@
                {/* Tutorial Manual */}
                <section className="mb-12">
                    <h2 className="text-3xl font-bold mb-8 text-center text-gray-800">Tutorial Manual Instal</h2>
-                   <div className="grid md:grid-cols-2 gap-6">
+                   <div className="grid grid-cols-1 gap-6">
                        
                        {/* Langkah 1 & 2 */}
                        <div className="bg-white/90 backdrop-blur-md p-6 rounded-xl shadow-sm border border-gray-200 border-t-4 border-t-blue-600">
@@ -649,20 +645,8 @@
                                <a href="https://play.google.com/store/apps/details?id=com.apkmirror.helper.prod" target="_blank" rel="noreferrer" className="block w-full text-center py-3 px-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold transition">Install APKMirror Helper</a>
                                <div className="pt-2 border-t border-gray-100">
                                    <p className="text-[10px] text-gray-400 font-bold mb-2 uppercase">Download File YTC:</p>
-                                   <a href="https://mega.nz/file/26IUCATB#60e7B0HhHWNx5OcRSf_aaYoR7VGNTy0TXcj3jIGj0n0" target="_blank" rel="noreferrer" className="block w-full text-center py-2 px-4 bg-gray-800 hover:bg-black text-white rounded-lg text-sm mb-2 transition">YTC Android Versi 10</a>
-                                   <a href="https://mega.nz/file/ejQEDIrI#TpHo0ydljistZf4tVrjli5SkSfSUXiOBJG4MQQzkVTQ" target="_blank" rel="noreferrer" className="block w-full text-center py-2 px-4 bg-gray-800 hover:bg-black text-white rounded-lg text-sm transition">YTC Android Versi 12+</a>
+                                   <a href="https://drive.google.com/file/d/1SEkbu7wjHtzNTWQcpIGN-Fha_wSTTUXw/view?usp=sharing" target="_blank" rel="noreferrer" className="block w-full text-center py-2 px-4 bg-gray-800 hover:bg-black text-white rounded-lg text-sm transition">Download YTC Edit</a>
                                </div>
-                           </div>
-                       </div>
-
-                       {/* Langkah 3 & 4 */}
-                       <div className="bg-white/90 backdrop-blur-md p-6 rounded-xl shadow-sm border border-gray-200 border-t-4 border-t-blue-600">
-                           <span className="inline-block bg-blue-600 text-white px-3 py-1 rounded-full text-xs font-bold mb-4 uppercase tracking-wider">Langkah 3 & 4</span>
-                           <h3 className="text-xl font-bold mb-3">VPN & Konfigurasi</h3>
-                           <p className="text-sm text-gray-600 mb-4 leading-relaxed">Instal salah satu VPN di bawah ini. Buka VPN dan <strong className="font-bold text-gray-900">pilih lokasi server India atau United State (Amerika)</strong> sebelum menjalankan aplikasi YouTube Create.</p>
-                           <div className="space-y-3">
-                               <a href="https://drive.google.com/file/d/1MLhH8ytWkjCkPDPH033TDzGIAGL4wa1c/view?usp=sharing" target="_blank" rel="noreferrer" className="block w-full text-center py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition">Download VPNS Unlimited</a>
-                               <a href="https://mega.nz/file/3yxUxYpa#g_B_Ygwnu97mxehrqd4kqTgq8i78rJ5wzJYu_Ika--s" target="_blank" rel="noreferrer" className="block w-full text-center py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition">Download Fire VPN</a>
                            </div>
                        </div>
                    </div>
@@ -671,7 +655,6 @@
                    <div className="mt-8 bg-blue-50 border-l-4 border-blue-600 p-6 rounded-r-xl shadow-inner">
                        <h3 className="text-lg font-bold mb-3 text-blue-900">Alur Kerja (Workflow):</h3>
                        <ul className="list-disc ml-5 space-y-2 text-gray-700 text-sm">
-                           <li>Aktifkan VPN (Server India / Amerika).</li>
                            <li>Buka <strong className="font-bold">YouTube Create</strong> &gt; Klik <strong className="font-bold">Buat Video</strong>.</li>
                            <li>Upload maksimal 3 gambar produk Anda.</li>
                            <li>Masukkan prompt sederhana (AI akan bekerja otomatis).</li>
